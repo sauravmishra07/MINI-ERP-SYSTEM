@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+//  ENUMS 
+
+enum Role {
+  EMPLOYEE
+  MANAGER
+  ADMIN
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum Status {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum AuditAction {
+  CREATED
+  UPDATED
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+
+//  MODELS 
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  avatar    String?
+  role      Role     @default(EMPLOYEE)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  requests  PurchaseRequest[] // requests created by this user
+  auditLogs AuditLog[]        // actions performed by this user
+
+  @@map("users")
+}
+
+model PurchaseRequest {
+  id           String    @id @default(uuid())
+  itemName     String    @map("item_name")
+  quantity     Float
+  unit         String    // pcs, kg, litre, etc.
+  department   String
+  requiredDate DateTime  @map("required_date")
+  reason       String
+  priority     Priority  @default(LOW)
+  status       Status    @default(DRAFT)
+  
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  createdBy    User      @relation(fields: [createdById], references: [id])
+  createdById  String    @map("created_by_id")
+  
+  auditLogs    AuditLog[]
+
+  @@map("purchase_requests")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  action     AuditAction
+  oldStatus  Status?     @map("old_status")
+  newStatus  Status?     @map("new_status")
+  remarks    String?     // optional manager comment
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  // Relations
+  request    PurchaseRequest @relation(fields: [requestId], references: [id])
+  requestId  String          @map("request_id")
+
+  performedBy   User   @relation(fields: [performedById], references: [id])
+  performedById String @map("performed_by_id")
+
+  @@map("audit_logs")
+}
