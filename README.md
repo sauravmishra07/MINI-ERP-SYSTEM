@@ -18,6 +18,7 @@ A full-stack Mini ERP system that allows employees to raise purchase requests an
 - [Run instructions](#run-instructions)
 - [Test accounts](#test-accounts)
 - [Application routes](#application-routes)
+- [Screenshots](#screenshots)
 - [Features](#features)
 - [API overview](#api-overview)
 - [AI usage disclosure](#ai-usage-disclosure)
@@ -272,6 +273,31 @@ All test accounts use the password: **`password123`**
 | `/requests/:id` | Request Details       | Owner / Manager / Admin | Full details, audit trail, submit button for draft owners   |
 | `/approvals`    | Approval Management   | Manager / Admin only | Review SUBMITTED requests — approve or reject with remarks     |
 | `*`             | 404 Not Found         | Public               | Friendly 404 page                                              |
+
+---
+
+## Screenshots
+
+### Login / Register page
+![Login / Register page](docs/images/authpage.png)
+
+### Employee — Dashboard
+![Employee Dashboard](docs/images/employee-dashboard.png)
+
+### Admin / Manager — Dashboard
+![Admin and Manager Dashboard](docs/images/admin-manager-dashboard.png)
+
+### Employee — Purchase Requests list
+![Employee Purchase Requests](docs/images/employee-purchaserequest.png)
+
+### Admin / Manager — Purchase Requests list
+![Admin and Manager Purchase Requests](docs/images/admin-manager-purchase-req.png)
+
+### Create Request form
+![Create Request Form](docs/images/request-form.png)
+
+### Admin — Approval Management
+![Approval Management](docs/images/admin-approval-management.png)
 
 ---
 
