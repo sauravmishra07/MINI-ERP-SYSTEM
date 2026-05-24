@@ -21,6 +21,9 @@ Express + TypeScript API for the Mini ERP system. It provides Google OAuth authe
   - [Common conventions](#common-conventions)
   - [Health](#health)
   - [Auth](#auth)
+  - [Purchase requests](#purchase-requests)
+  - [Dashboard](#dashboard)
+- [Role-based access](#role-based-access)
 - [Error responses](#error-responses)
 - [Protecting routes](#protecting-routes)
 
@@ -37,6 +40,7 @@ Express + TypeScript API for the Mini ERP system. It provides Google OAuth authe
 | ORM          | Prisma                              |
 | Auth         | Passport (Google OAuth 2.0) + JWT     |
 | Validation   | Zod                                 |
+| Export       | json2csv                            |
 | Logging      | Winston                             |
 
 ---
@@ -56,7 +60,7 @@ Express + TypeScript API for the Mini ERP system. It provides Google OAuth authe
 server/
 ├── src/
 │   ├── config/           # App, auth, logger, Passport config
-│   ├── controllers/      # Route handlers
+│   ├── controllers/      # Route handlers (auth, requests, dashboard)
 │   ├── lib/              # Prisma client singleton
 │   ├── middlewares/      # Auth, errors, correlation ID
 │   ├── prisma/
@@ -394,9 +398,426 @@ fetch("http://localhost:3000/api/v1/auth/logout", {
 
 ---
 
+### Purchase requests
+
+Base path: `/api/v1/requests`  
+**Authentication:** Required on all routes (cookie or Bearer token)
+
+#### Status workflow
+
+```
+DRAFT → SUBMITTED → APPROVED
+                  ↘ REJECTED
+```
+
+| Status      | Description                          |
+| ----------- | ------------------------------------ |
+| `DRAFT`     | Created, editable by owner           |
+| `SUBMITTED` | Sent for manager review              |
+| `APPROVED`  | Approved by manager/admin            |
+| `REJECTED`  | Rejected by manager/admin            |
+
+Every status change writes an `AuditLog` entry.
+
+---
+
+#### `POST /api/v1/requests`
+
+Create a new purchase request (starts as `DRAFT`).
+
+**Authentication:** Required  
+**Roles:** Any authenticated user
+
+**Request body (JSON):**
+
+| Field          | Type     | Required | Rules                                      |
+| -------------- | -------- | -------- | ------------------------------------------ |
+| `itemName`     | string   | Yes      | Min length 1                               |
+| `quantity`     | number   | Yes      | Must be > 0                                |
+| `unit`         | string   | Yes      | e.g. `pcs`, `kg`, `litre`                  |
+| `department`   | string   | Yes      | Min length 1                               |
+| `requiredDate` | string   | Yes      | ISO 8601 datetime (e.g. `2026-06-01T00:00:00.000Z`) |
+| `reason`       | string   | Yes      | Min length 10                              |
+| `priority`     | string   | Yes      | `LOW` \| `MEDIUM` \| `HIGH`                |
+
+**Example request:**
+
+```json
+{
+  "itemName": "Office chairs",
+  "quantity": 10,
+  "unit": "pcs",
+  "department": "Operations",
+  "requiredDate": "2026-06-15T00:00:00.000Z",
+  "reason": "Replacement for worn seating in the main office area",
+  "priority": "MEDIUM"
+}
+```
+
+**Response `201`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "request": {
+      "id": "uuid",
+      "itemName": "Office chairs",
+      "quantity": 10,
+      "unit": "pcs",
+      "department": "Operations",
+      "requiredDate": "2026-06-15T00:00:00.000Z",
+      "reason": "Replacement for worn seating in the main office area",
+      "priority": "MEDIUM",
+      "status": "DRAFT",
+      "createdById": "user-uuid",
+      "createdAt": "2026-05-23T12:00:00.000Z",
+      "updatedAt": "2026-05-23T12:00:00.000Z",
+      "createdBy": {
+        "name": "Jane Doe",
+        "email": "jane@k95foods.com"
+      }
+    }
+  }
+}
+```
+
+**Validation error `400`:**
+
+```json
+{
+  "message": "Invalid request body",
+  "success": false,
+  "error": { }
+}
+```
+
+---
+
+#### `GET /api/v1/requests`
+
+List purchase requests with filters and pagination.
+
+**Authentication:** Required  
+**Access:** `EMPLOYEE` sees only their own requests; `MANAGER` and `ADMIN` see all
+
+**Query parameters:**
+
+| Param        | Type   | Default | Description                                      |
+| ------------ | ------ | ------- | ------------------------------------------------ |
+| `status`     | string | —       | `DRAFT` \| `SUBMITTED` \| `APPROVED` \| `REJECTED` |
+| `department` | string | —     | Case-insensitive partial match                   |
+| `priority`   | string | —       | `LOW` \| `MEDIUM` \| `HIGH`                      |
+| `from`       | string | —       | Filter `createdAt` ≥ date (ISO or parseable)     |
+| `to`         | string | —       | Filter `createdAt` ≤ date                        |
+| `page`       | number | `1`     | Page number                                      |
+| `limit`      | number | `10`    | Items per page (max 100)                         |
+
+**Example:**
+
+```
+GET /api/v1/requests?status=SUBMITTED&priority=HIGH&page=1&limit=10
+```
+
+**Response `200`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "requests": [
+      {
+        "id": "uuid",
+        "itemName": "Office chairs",
+        "quantity": 10,
+        "unit": "pcs",
+        "department": "Operations",
+        "requiredDate": "2026-06-15T00:00:00.000Z",
+        "reason": "...",
+        "priority": "MEDIUM",
+        "status": "SUBMITTED",
+        "createdById": "user-uuid",
+        "createdAt": "2026-05-23T12:00:00.000Z",
+        "updatedAt": "2026-05-23T12:00:00.000Z",
+        "createdBy": {
+          "name": "Jane Doe",
+          "email": "jane@k95foods.com"
+        }
+      }
+    ],
+    "total": 25,
+    "page": 1,
+    "limit": 10,
+    "totalPages": 3
+  }
+}
+```
+
+---
+
+#### `GET /api/v1/requests/export`
+
+Download filtered purchase requests as a CSV file.
+
+**Authentication:** Required  
+**Access:** Same scope as list (`EMPLOYEE` = own rows only)
+
+**Query parameters:** Same as `GET /api/v1/requests` (except `page` / `limit` are ignored)
+
+**Response `200`:** `Content-Type: text/csv` with attachment `purchase_requests.csv`
+
+**CSV columns:** `id`, `itemName`, `quantity`, `unit`, `department`, `requiredDate`, `priority`, `status`, `reason`, `createdByName`, `createdByEmail`, `createdAt`
+
+**Example:**
+
+```bash
+curl "http://localhost:3000/api/v1/requests/export?status=APPROVED" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -o purchase_requests.csv
+```
+
+---
+
+#### `GET /api/v1/requests/:id`
+
+Get a single purchase request with audit history.
+
+**Authentication:** Required  
+**Access:** Owner (`EMPLOYEE`) or `MANAGER` / `ADMIN`
+
+**Response `200`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "request": {
+      "id": "uuid",
+      "itemName": "Office chairs",
+      "quantity": 10,
+      "unit": "pcs",
+      "department": "Operations",
+      "requiredDate": "2026-06-15T00:00:00.000Z",
+      "reason": "...",
+      "priority": "MEDIUM",
+      "status": "SUBMITTED",
+      "createdById": "user-uuid",
+      "createdAt": "2026-05-23T12:00:00.000Z",
+      "updatedAt": "2026-05-23T12:05:00.000Z",
+      "createdBy": {
+        "name": "Jane Doe",
+        "email": "jane@k95foods.com",
+        "avatar": "https://..."
+      },
+      "auditLogs": [
+        {
+          "id": "log-uuid",
+          "action": "CREATED",
+          "oldStatus": null,
+          "newStatus": "DRAFT",
+          "remarks": null,
+          "createdAt": "2026-05-23T12:00:00.000Z",
+          "performedBy": { "name": "Jane Doe" }
+        },
+        {
+          "id": "log-uuid-2",
+          "action": "SUBMITTED",
+          "oldStatus": "DRAFT",
+          "newStatus": "SUBMITTED",
+          "remarks": null,
+          "createdAt": "2026-05-23T12:05:00.000Z",
+          "performedBy": { "name": "Jane Doe" }
+        }
+      ]
+    }
+  }
+}
+```
+
+**Response `404`:** Request not found  
+**Response `403`:** Employee accessing another user's request
+
+---
+
+#### `PATCH /api/v1/requests/:id/submit`
+
+Submit a draft request for approval.
+
+**Authentication:** Required  
+**Roles:** Owner only (must be `createdById`)
+
+**Request body:** None
+
+**Rules:**
+
+- Current status must be `DRAFT`
+- Only the creator can submit
+
+**Response `200`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "request": {
+      "id": "uuid",
+      "status": "SUBMITTED",
+      "...": "..."
+    }
+  }
+}
+```
+
+**Errors:**
+
+| Status | Message                              |
+| ------ | ------------------------------------ |
+| `400`  | Only drafts can be submitted         |
+| `403`  | Not your request                     |
+| `404`  | Purchase request not found           |
+
+---
+
+#### `PATCH /api/v1/requests/:id/approve`
+
+Approve a submitted request.
+
+**Authentication:** Required  
+**Roles:** `MANAGER`, `ADMIN` only
+
+**Request body (JSON, optional):**
+
+| Field     | Type   | Required | Description              |
+| --------- | ------ | -------- | ------------------------ |
+| `remarks` | string | No       | Optional manager comment |
+
+**Example:**
+
+```json
+{
+  "remarks": "Approved for Q2 budget"
+}
+```
+
+**Rules:** Current status must be `SUBMITTED`
+
+**Response `200`:** Updated request with `status: "APPROVED"`
+
+---
+
+#### `PATCH /api/v1/requests/:id/reject`
+
+Reject a submitted request.
+
+**Authentication:** Required  
+**Roles:** `MANAGER`, `ADMIN` only
+
+**Request body (JSON, optional):** Same as approve (`remarks` optional)
+
+**Rules:** Current status must be `SUBMITTED`
+
+**Response `200`:** Updated request with `status: "REJECTED"`
+
+---
+
+### Dashboard
+
+Base path: `/api/v1/dashboard`  
+**Authentication:** Required on all routes
+
+---
+
+#### `GET /api/v1/dashboard/stats`
+
+Aggregate counts for purchase requests.
+
+**Access:**
+
+- `EMPLOYEE` — stats for their own requests only
+- `MANAGER` / `ADMIN` — stats across all requests
+
+**Response `200`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "total": 42,
+    "pending": 8,
+    "approved": 30,
+    "rejected": 4
+  }
+}
+```
+
+| Field      | Meaning                                      |
+| ---------- | -------------------------------------------- |
+| `total`    | All requests in scope                        |
+| `pending`  | Requests with status `SUBMITTED`             |
+| `approved` | Requests with status `APPROVED`              |
+| `rejected` | Requests with status `REJECTED`              |
+
+---
+
+#### `GET /api/v1/dashboard/activity`
+
+Recent audit log activity (last 10 entries).
+
+**Access:**
+
+- `EMPLOYEE` — activity on their own requests only
+- `MANAGER` / `ADMIN` — activity across all requests
+
+**Response `200`:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "logs": [
+      {
+        "id": "log-uuid",
+        "action": "APPROVED",
+        "oldStatus": "SUBMITTED",
+        "newStatus": "APPROVED",
+        "remarks": "Approved for Q2 budget",
+        "createdAt": "2026-05-23T12:30:00.000Z",
+        "performedBy": {
+          "name": "Manager Name",
+          "avatar": "https://..."
+        },
+        "request": {
+          "itemName": "Office chairs"
+        }
+      }
+    ]
+  }
+}
+```
+
+**`action` values:** `CREATED` | `UPDATED` | `SUBMITTED` | `APPROVED` | `REJECTED`
+
+---
+
 ### API v2
 
 `/api/v2` is reserved for future endpoints. No routes are registered yet.
+
+---
+
+## Role-based access
+
+| Endpoint                              | EMPLOYEE | MANAGER | ADMIN |
+| ------------------------------------- | -------- | ------- | ----- |
+| `POST /requests`                      | ✅       | ✅      | ✅    |
+| `GET /requests`                       | Own only | All     | All   |
+| `GET /requests/export`                | Own only | All     | All   |
+| `GET /requests/:id`                   | Own only | All     | All   |
+| `PATCH /requests/:id/submit`          | Own only | —       | —     |
+| `PATCH /requests/:id/approve`         | —        | ✅      | ✅    |
+| `PATCH /requests/:id/reject`          | —        | ✅      | ✅    |
+| `GET /dashboard/stats`                | Own only | All     | All   |
+| `GET /dashboard/activity`             | Own only | All     | All   |
 
 ---
 
