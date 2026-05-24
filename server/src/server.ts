@@ -23,7 +23,7 @@ const ALLOWED_ORIGINS = [
 const VERCEL_PATTERN = /^https:\/\/mini-erp-system-[a-z0-9]+-sauravmishra07s-projects\.vercel\.app$/;
 
 app.use(cors({
-  origin: (origin, callback) => {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     // Allow requests with no origin (curl, Postman, server-to-server)
     if (!origin) return callback(null, true);
 
