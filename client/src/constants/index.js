@@ -30,4 +30,4 @@ export const PRIORITY_COLORS = {
   HIGH: 'bg-red-100 text-red-700',
 }
 
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+export const API_URL = import.meta.env.VITE_API_URL || 'https://mini-erp-system-fy7a.onrender.com/'
