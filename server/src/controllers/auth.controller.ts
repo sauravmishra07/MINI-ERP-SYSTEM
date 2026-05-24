@@ -7,10 +7,12 @@ import { generateToken } from "../utils/helpers/jwt";
 import { AuthenticatedRequest } from "../types/auth.types";
 import { registerSchema, loginSchema } from "../validators/auth.validator";
 
+const isProduction = process.env.NODE_ENV === "production";
+
 const cookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "lax" as const,
+  secure: isProduction,                          // must be true for sameSite: "none"
+  sameSite: isProduction ? ("none" as const) : ("lax" as const),
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: "/",
 };
