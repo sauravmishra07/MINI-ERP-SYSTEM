@@ -44,6 +44,7 @@ model User {
   email     String   @unique
   name      String
   avatar    String?
+  password  String?  // null for Google OAuth users
   role      Role     @default(EMPLOYEE)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
